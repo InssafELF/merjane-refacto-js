@@ -45,6 +45,39 @@ export class ProductService {
 		}
 	}
 
+	public async notifyDelay(leadTime: number, p: Product): Promise<void> {
+		await this.updateProduct(p.id, {leadTime});
+		this.ns.sendDelayNotification(leadTime, p.name);
+	}
+
+	public async handleSeasonalProduct(p: Product, now: Now = new Date()): Promise<void> {
+		const expectedRestockDate = new Date(now.getTime() + (p.leadTime * DAY_IN_MS));
+		if (expectedRestockDate > p.seasonEndDate!) {
+			this.ns.sendOutOfStockNotification(p.name);
+			await this.updateProduct(p.id, {available: 0});
+			return;
+		}
+
+		if (p.seasonStartDate! > now) {
+			this.ns.sendOutOfStockNotification(p.name);
+			// Keep a DB write (the previous implementation was writing the whole object).
+			await this.updateProduct(p.id, {available: p.available, leadTime: p.leadTime});
+			return;
+		}
+
+		await this.notifyDelay(p.leadTime, p);
+	}
+
+	public async handleExpiredProduct(p: Product, now: Now = new Date()): Promise<void> {
+		if (p.available > 0 && this.isNotExpired(p, now)) {
+			await this.decrementAvailable(p);
+			return;
+		}
+
+		this.ns.sendExpirationNotification(p.name, p.expiryDate!);
+		await this.updateProduct(p.id, {available: 0});
+	}
+
 	private async processNormalProduct(product: Product): Promise<void> {
 		if (product.available > 0) {
 			await this.decrementAvailable(product);
@@ -82,41 +115,8 @@ export class ProductService {
 		await this.db.update(products).set(patch).where(eq(products.id, productId));
 	}
 
-	public async notifyDelay(leadTime: number, p: Product): Promise<void> {
-		await this.updateProduct(p.id, {leadTime});
-		this.ns.sendDelayNotification(leadTime, p.name);
-	}
-
-	public async handleSeasonalProduct(p: Product, now: Now = new Date()): Promise<void> {
-		const expectedRestockDate = new Date(now.getTime() + (p.leadTime * DAY_IN_MS));
-		if (expectedRestockDate > p.seasonEndDate!) {
-			this.ns.sendOutOfStockNotification(p.name);
-			await this.updateProduct(p.id, {available: 0});
-			return;
-		}
-
-		if (p.seasonStartDate! > now) {
-			this.ns.sendOutOfStockNotification(p.name);
-			// Keep a DB write (the previous implementation was writing the whole object).
-			await this.updateProduct(p.id, {available: p.available, leadTime: p.leadTime});
-			return;
-		}
-
-		await this.notifyDelay(p.leadTime, p);
-	}
-
 	private isWithinSeason(p: Product, now: Now): boolean {
 		return Boolean(p.seasonStartDate && p.seasonEndDate && now > p.seasonStartDate && now < p.seasonEndDate);
-	}
-
-	public async handleExpiredProduct(p: Product, now: Now = new Date()): Promise<void> {
-		if (p.available > 0 && this.isNotExpired(p, now)) {
-			await this.decrementAvailable(p);
-			return;
-		}
-
-		this.ns.sendExpirationNotification(p.name, p.expiryDate!);
-		await this.updateProduct(p.id, {available: 0});
 	}
 
 	private isNotExpired(p: Product, now: Now): boolean {
