@@ -46,10 +46,27 @@ describe('MyController Integration Tests', () => {
 			return order!.orderId;
 		});
 
-		await client.post(`/orders/${orderId}/processOrder`).expect(200).expect('Content-Type', /application\/json/);
+		await client.post(`/orders/${orderId}/processOrder`)
+			.expect(200)
+			.expect('Content-Type', /application\/json/);
 
 		const resultOrder = await database.query.orders.findFirst({where: eq(orders.id, orderId)});
 		expect(resultOrder!.id).toBe(orderId);
+
+		// Side effects on inventory
+		const updatedProducts = await database.query.products.findMany();
+		const byName = (name: string) => updatedProducts.find(p => p.name === name)!;
+		expect(byName('USB Cable').available).toBe(29);
+		expect(byName('USB Dongle').available).toBe(0);
+		expect(byName('Butter').available).toBe(29);
+		expect(byName('Milk').available).toBe(0);
+		expect(byName('Watermelon').available).toBe(29);
+		expect(byName('Grapes').available).toBe(30);
+
+		// Side effects on notifications
+		expect(notificationServiceMock.sendDelayNotification).toHaveBeenCalledWith(10, 'USB Dongle');
+		expect(notificationServiceMock.sendExpirationNotification).toHaveBeenCalledOnce();
+		expect(notificationServiceMock.sendOutOfStockNotification).toHaveBeenCalledWith('Grapes');
 	});
 
 	function createProducts(): ProductInsert[] {

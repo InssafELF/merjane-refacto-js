@@ -31,5 +31,5 @@ export async function createDatabaseMock() {
 	const databaseMock = drizzle(sqlite, {
 		schema,
 	});
-	return {databaseMock, databaseName};
+	return {databaseMock, databaseName, close: () => sqlite.close(),};
 }
